@@ -7,48 +7,42 @@ from tqdm import tqdm
 
 from src.logger import Logger
 from src.scoring import bc_scoring, bc_score_names, nanmean
-from config import config_data, config_model, config_runtime
-from data_handler import Dataset, collate_batch_data
-from src.dataset import select_by_sid, select_by_max_ba, select_by_interface_types
-from model import Model
+from model.config import config_data, config_model, config_runtime
+from model.data_handler import collate_batch_data
+from src.dataset import StructuresDataset
+from model.model import Model
 
 
 def setup_dataloader(config_data, sids_selection_filepath):
-    # load selected sids
-    sids_sel = np.genfromtxt(sids_selection_filepath, dtype=np.dtype('U'))
 
     # create dataset
-    dataset = Dataset(config_data['dataset_filepath'])
-
-    # data selection criteria
-    m = select_by_sid(dataset, sids_sel) # select by sids
-    m &= select_by_max_ba(dataset, config_data['max_ba'])  # select by max assembly count
-    m &= (dataset.sizes[:,0] <= config_data['max_size']) # select by max size
-    m &= (dataset.sizes[:,1] >= config_data['min_num_res'])  # select by min size
-    m &= select_by_interface_types(dataset, config_data['l_types'], np.concatenate(config_data['r_types']))  # select by interface type
-
-    # update dataset selection
-    dataset.update_mask(m)
-
-    # set dataset types for labels
-    dataset.set_types(config_data['l_types'], config_data['r_types'])
+    dataset = StructuresDataset(sids_selection_filepath['wt_pdbs'], sids_selection_filepath['skempi'])
 
     # define data loader
-    dataloader = pt.utils.data.DataLoader(dataset, batch_size=config_runtime['batch_size'], shuffle=True, num_workers=8, collate_fn=collate_batch_data, pin_memory=True, prefetch_factor=2)
+    dataloader = pt.utils.data.DataLoader(dataset,
+                                          batch_size=config_runtime['batch_size'],
+                                          shuffle=True, #num_workers=8,
+                                          collate_fn=collate_batch_data,
+                                          pin_memory=True,
+                                          prefetch_factor=2)
 
     return dataloader
 
 
 def eval_step(model, device, batch_data, criterion, pos_ratios, pos_weight_factor, global_step):
     # unpack data
-    X, ids_topk, q, M, y = [data.to(device) for data in batch_data]
+    X, ids_topk, q, M, mut, batch_M, y = [data.to(device) for data in batch_data]
 
     # run model
-    z = model.forward(X, ids_topk, q, M)
+    z = model.forward(X, ids_topk, q, M, mut, batch_M)
 
     # compute weighted loss
     pos_ratios += (pt.mean(y,dim=0).detach() - pos_ratios) / (1.0 + np.sqrt(global_step))
     criterion.pos_weight = pos_weight_factor * (1.0 - pos_ratios) / (pos_ratios + 1e-6)
+    z = z.unsqueeze(dim=-1)
+    y = y.unsqueeze(dim=-1)
+    z = pt.cat([z, -z], dim = 1)
+    y = pt.cat([y, -y], dim = 1)
     dloss = criterion(z, y)
 
     # re-weighted losses
@@ -120,21 +114,22 @@ def train(config_data, config_model, config_runtime, output_path):
     logger.print(model)
     logger.print(f"> {sum([int(pt.prod(pt.tensor(p.shape))) for p in model.parameters()])} parameters")
 
-    # reload model if configured
-    model_filepath = os.path.join(output_path, 'model_ckpt.pt')
-    if os.path.isfile(model_filepath) and config_runtime["reload"]:
-        logger.print("Reloading model from save file")
-        model.load_state_dict(pt.load(model_filepath))
-        # get last global step
-        global_step = json.loads([l for l in open(logger.log_lst_filepath, 'r')][-1])['global_step']
-        # dynamic positive weight
-        pos_ratios = pt.from_numpy(np.array(json.loads([l for l in open(logger.log_lst_filepath, 'r')][-1])['pos_ratios'])).float().to(device)
-    else:
-        # starting global step
-        global_step = 0
-        # dynamic positive weight
-        pos_ratios = 0.5*pt.ones(len(config_data['r_types']), dtype=pt.float).to(device)
-
+#   TODO: Check and fix this to work
+#    # reload model if configured
+#    model_filepath = os.path.join(output_path, 'model_ckpt.pt')
+#    if os.path.isfile(model_filepath) and config_runtime["reload"]:
+#        logger.print("Reloading model from save file")
+#        model.load_state_dict(pt.load(model_filepath))
+#        # get last global step
+#        global_step = json.loads([l for l in open(logger.log_lst_filepath, 'r')][-1])['global_step']
+#        # dynamic positive weight
+#        pos_ratios = pt.from_numpy(np.array(json.loads([l for l in open(logger.log_lst_filepath, 'r')][-1])['pos_ratios'])).float().to(device)
+#    else:
+    # starting global step
+    global_step = 0
+    # dynamic positive weight
+    pos_ratios = 0.5*pt.ones(2, dtype=pt.float).to(device)
+#
     # debug print
     logger.print(">>> Loading data")
 
@@ -167,13 +162,14 @@ def train(config_data, config_model, config_runtime, output_path):
     # min loss initial value
     min_loss = 1e9
 
+    # TODO: Implement get_largest
     # quick training step on largest data: memory check and pre-allocation
-    batch_data = collate_batch_data([dataloader_train.dataset.get_largest()])
-    optimizer.zero_grad()
-    losses, _, _ = eval_step(model, device, batch_data, criterion, pos_ratios, config_runtime['pos_weight_factor'], global_step)
-    loss = pt.sum(losses)
-    loss.backward()
-    optimizer.step()
+    #batch_data = dataloader_train.dataset.get_largest()
+    #optimizer.zero_grad()
+    #losses, _, _ = eval_step(model, device, batch_data, criterion, pos_ratios, config_runtime['pos_weight_factor'], global_step)
+    #loss = pt.sum(losses)
+    #loss.backward()
+    #optimizer.step()
 
     # start training
     for epoch in range(config_runtime['num_epochs']):

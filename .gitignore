@@ -4,4 +4,15 @@
 *.ipynb
 **/*.ipynb
 
+**/*.swp
+
 datasets
+**/__pycache__
+__pycache__
+*.pt
+**/*.pt
+**/*.dat
+*.dat
+**/*.log
+*.log
+tb

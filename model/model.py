@@ -54,7 +54,7 @@ class Model(pt.nn.Module):
             pt.nn.Linear(config['out']['N0'], 1),
         )
 
-    def forward(self, X, ids_topk, q0, M, mut):
+    def forward(self, X, ids_topk, q0, M, mut, batch_M):
         # encode features
         q = self.em.forward(q0)
 
@@ -76,7 +76,9 @@ class Model(pt.nn.Module):
         
         zm = pt.cat([z, mut], dim = 1)
         zm = self.mutm.forward(zm)
-        agg = zm.mean(dim = 0)
-        out = self.out.forward(agg)
+        agg = zm.unsqueeze(dim=2) * batch_M.unsqueeze(dim = 1)
+        agg = agg.mean(dim = 0)
+        out = self.out.forward(agg.T)
+        out = out.reshape(-1)
 
         return out

@@ -5,9 +5,12 @@ from src.data_encoding import categ_to_resnames
 
 config_data = {
     'dataset_filepath': "datasets/contacts_rr5A_64nn_8192.h5",
-    # 'dataset_filepath': "/tmp/"+sys.argv[-1]+"/contacts_rr5A_64nn_8192.h5",
-    'train_selection_filepath': "datasets/subunits_train_set.txt",
-    'test_selection_filepath': "datasets/subunits_test_set.txt",
+    'train_selection_filepath': {"skempi" : "datasets/skempi_v2_cleaned.csv",
+                                 "wt_pdbs" : "datasets/skempi_pdbs"
+                                },
+    'test_selection_filepath': {"skempi" : "datasets/skempi_v2_cleaned.csv",
+                                 "wt_pdbs" : "datasets/skempi_pdbs"
+                               },
     'max_ba': 1,
     'max_size': 1024*8,
     'min_num_res': 48,
@@ -68,13 +71,13 @@ config_model = {
 tag = datetime.now().strftime("_%Y-%m-%d_%H-%M")
 
 config_runtime = {
-    'run_name': 'i_v4_1'+tag,
+    'run_name': 'a_v0_1'+tag,
     'output_dir': 'save',
-    'reload': True,
-    'device': 'cuda',
+    'reload': False,
+    'device': 'cpu',
     'num_epochs': 100,
     'batch_size': 1,
-    'log_step': 1024,
+    'log_step': 2,
     'eval_step': 1024*8,
     'eval_size': 1024,
     'learning_rate': 1e-5,
