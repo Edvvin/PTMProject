@@ -7,10 +7,10 @@ from tqdm import tqdm
 
 from src.logger import Logger
 from src.scoring import bc_scoring, bc_score_names, nanmean
-from model.config import config_data, config_model, config_runtime
-from model.data_handler import collate_batch_data
+from config import config_data, config_model, config_runtime
+from data_handler import collate_batch_data
 from src.dataset import StructuresDataset
-from model.model import Model
+from model import Model
 
 
 def setup_dataloader(config_data, sids_selection_filepath):

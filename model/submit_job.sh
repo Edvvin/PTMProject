@@ -23,13 +23,15 @@ cp -L -r src "$output_dir/$run_name"
 ln -rsf datasets "$output_dir/$run_name"
 
 # copy job file
-cp train.job "$output_dir/$run_name"
+# cp train.job "$output_dir/$run_name"
 
 # go to working directory
 cd "$output_dir/$run_name"
 
 # debug print
 echo "Working directory: $(pwd)"
+
+python ./main.py
 
 # queue job
 #sbatch -J "$1" train.job
