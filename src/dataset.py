@@ -167,8 +167,8 @@ class StructuresDataset(pt.utils.data.Dataset):
             structure = read_pdb(pdb_filepath)
         except Exception as e:
             print(f"ReadError: {pdb_filepath}: {e}")
-            return None, None, pdb_filepath
-        
+            return None, None, None, None, None, None
+
         # label
         deltaG = mut['Affinity_mut_parsed'] - mut['Affinity_wt_parsed']
         label = (deltaG >= 0).astype(np.float32)

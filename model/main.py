@@ -29,7 +29,7 @@ def setup_dataloader(config_data, sids_selection_filepath):
     return dataloader
 
 
-def eval_step(model, device, batch_data, criterion, pos_ratios, pos_weight_factor, global_step):
+def eval_step(model, device, batch_data, criterion, pos_ratios, pos_weight_factor, global_step, dyn_pos_ratio = True):
     # unpack data
     X, ids_topk, q, M, mut, batch_M, y = [data.to(device) for data in batch_data]
 
@@ -37,12 +37,14 @@ def eval_step(model, device, batch_data, criterion, pos_ratios, pos_weight_facto
     z = model.forward(X, ids_topk, q, M, mut, batch_M)
 
     # compute weighted loss
-    pos_ratios += (pt.mean(y,dim=0).detach() - pos_ratios) / (1.0 + np.sqrt(global_step))
-    criterion.pos_weight = pos_weight_factor * (1.0 - pos_ratios) / (pos_ratios + 1e-6)
-    z = z.unsqueeze(dim=-1)
-    y = y.unsqueeze(dim=-1)
-    z = pt.cat([z, -z], dim = 1)
-    y = pt.cat([y, -y], dim = 1)
+    if(dyn_pos_ratio):
+        mean_y = pt.mean(y, dim=0)
+        pos_ratios += (pt.tensor([mean_y, 1-mean_y]).detach() - pos_ratios) / (1.0 + np.sqrt(global_step))
+        criterion.pos_weight = pos_weight_factor * (1.0 - pos_ratios) / (pos_ratios + 1e-6)
+    z = pt.unsqueeze(z, dim=-1)
+    y = pt.unsqueeze(y, dim=-1)
+    z = pt.cat([z, -z], dim=-1)
+    y = pt.cat([y, 1-y], dim=-1)
     dloss = criterion(z, y)
 
     # re-weighted losses
@@ -127,12 +129,15 @@ def train(config_data, config_model, config_runtime, output_path):
 #    else:
     # starting global step
     global_step = 0
+    
+    # TODO: determine pos_ratio
     # dynamic positive weight
     pos_ratios = 0.5*pt.ones(2, dtype=pt.float).to(device)
-#
+
     # debug print
     logger.print(">>> Loading data")
 
+    # TODO: set up random split for train/validation
     # setup dataloaders
     dataloader_train = setup_dataloader(config_data, config_data['train_selection_filepath'])
     dataloader_test = setup_dataloader(config_data, config_data['test_selection_filepath'])
