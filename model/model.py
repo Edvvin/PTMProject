@@ -10,9 +10,6 @@ class Model(pt.nn.Module):
         self.em = pt.nn.Sequential(
             pt.nn.Linear(config['em']['N0'], config['em']['N1']),
             pt.nn.ELU(),
-            pt.nn.Linear(config['em']['N1'], config['em']['N1']),
-            pt.nn.ELU(),
-            pt.nn.Linear(config['em']['N1'], config['em']['N1']),
         )
         # atomic level state update model
         self.sum = pt.nn.Sequential(*[StateUpdateLayer(layer_params) for layer_params in config['sum']])
@@ -24,7 +21,6 @@ class Model(pt.nn.Module):
         self.dm = pt.nn.Sequential(
             pt.nn.Linear(2*config['dm']['N0'], config['dm']['N1']),
             pt.nn.ELU(),
-            pt.nn.Linear(config['dm']['N1'], config['dm']['N1']),
         )
         
         mutm_layers = [

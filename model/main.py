@@ -2,6 +2,7 @@ import os
 import json
 import numpy as np
 import torch as pt
+from torch.utils.data import random_split
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -17,16 +18,29 @@ def setup_dataloader(config_data, sids_selection_filepath):
 
     # create dataset
     dataset = StructuresDataset(sids_selection_filepath['wt_pdbs'], sids_selection_filepath['skempi'])
+    
+    val_size = int(0.1764 * len(dataset))
+    train_size = len(dataset) - val_size
+    
+    train_data, val_data = random_split(dataset, 
+                                        [train_size, val_size])
+                                        #generator=torch.Generator().manual_seed(42))
 
     # define data loader
-    dataloader = pt.utils.data.DataLoader(dataset,
+    train_dataloader = pt.utils.data.DataLoader(train_data,
                                           batch_size=config_runtime['batch_size'],
                                           shuffle=True, #num_workers=8,
                                           collate_fn=collate_batch_data,
-                                          pin_memory=True,
-                                          prefetch_factor=2)
+                                          pin_memory=True)
+    
+    val_dataloader = pt.utils.data.DataLoader(val_data,
+                                          batch_size=config_runtime['batch_size'],
+                                          shuffle=True, #num_workers=8,
+                                          collate_fn=collate_batch_data,
+                                          pin_memory=True)
+                                          #prefetch_factor=2)
 
-    return dataloader
+    return train_dataloader, val_dataloader
 
 
 def eval_step(model, device, batch_data, criterion, pos_ratios, pos_weight_factor, global_step, dyn_pos_ratio = True):
@@ -39,7 +53,7 @@ def eval_step(model, device, batch_data, criterion, pos_ratios, pos_weight_facto
     # compute weighted loss
     if(dyn_pos_ratio):
         mean_y = pt.mean(y, dim=0)
-        pos_ratios += (pt.tensor([mean_y, 1-mean_y]).detach() - pos_ratios) / (1.0 + np.sqrt(global_step))
+        pos_ratios += (pt.tensor([mean_y, 1-mean_y]).to(device).detach() - pos_ratios) / (1.0 + np.sqrt(global_step))
         criterion.pos_weight = pos_weight_factor * (1.0 - pos_ratios) / (pos_ratios + 1e-6)
     z = pt.unsqueeze(z, dim=-1)
     y = pt.unsqueeze(y, dim=-1)
@@ -139,12 +153,11 @@ def train(config_data, config_model, config_runtime, output_path):
 
     # TODO: set up random split for train/validation
     # setup dataloaders
-    dataloader_train = setup_dataloader(config_data, config_data['train_selection_filepath'])
-    dataloader_test = setup_dataloader(config_data, config_data['test_selection_filepath'])
+    dataloader_train, dataloader_val = setup_dataloader(config_data, config_data['train_selection_filepath'])
 
     # debug print
     logger.print(f"> training data size: {len(dataloader_train)}")
-    logger.print(f"> testing data size: {len(dataloader_test)}")
+    logger.print(f"> testing data size: {len(dataloader_val)}")
 
     # debug print
     logger.print(">>> Starting training")
@@ -226,7 +239,7 @@ def train(config_data, config_model, config_runtime, output_path):
                 with pt.no_grad():
                     # evaluate model
                     test_results = []
-                    for step_te, batch_test_data in enumerate(dataloader_test):
+                    for step_te, batch_test_data in enumerate(dataloader_val):
                         # forward propagation
                         losses, y, p = eval_step(model, device, batch_test_data, criterion, pos_ratios, config_runtime['pos_weight_factor'], global_step)
 

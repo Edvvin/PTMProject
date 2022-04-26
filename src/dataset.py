@@ -142,14 +142,16 @@ def parse_skempi_entry(entry):
 
 
 class StructuresDataset(pt.utils.data.Dataset):
-    def __init__(self, wtpdb_dir, skempi_path):
+    def __init__(self, wtpdb_dir, skempi_path, max_chain_size=5000):
         super(StructuresDataset).__init__()
         # store dataset filepath
         self.wtpdb_dir = wtpdb_dir
         skempi = pd.read_csv(skempi_path, sep=';')
         self.skempi = skempi[['#Pdb', 'Mutation(s)_cleaned',
                          'iMutation_Location(s)', 'Affinity_mut_parsed',
-                         'Affinity_wt_parsed']]
+                         'Affinity_wt_parsed', 'sizes']]
+        if max_chain_size != None:
+            self.skempi = self.skempi[self.skempi['sizes'] < max_chain_size]
 
     def __len__(self):
         return len(self.skempi)

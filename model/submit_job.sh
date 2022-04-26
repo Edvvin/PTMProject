@@ -31,7 +31,7 @@ cd "$output_dir/$run_name"
 # debug print
 echo "Working directory: $(pwd)"
 
-python ./main.py
+python ./main.py 2> "general_log.txt"
 
 # queue job
 #sbatch -J "$1" train.job

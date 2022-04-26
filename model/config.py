@@ -5,15 +5,16 @@ from src.data_encoding import categ_to_resnames
 
 config_data = {
     'dataset_filepath': "datasets/contacts_rr5A_64nn_8192.h5",
-    'train_selection_filepath': {"skempi" : "datasets/skempi_v2_cleaned.csv",
+    'train_selection_filepath': {"skempi" : "datasets/skempi_v3_sizes_train.csv",
                                  "wt_pdbs" : "datasets/skempi_pdbs"
                                 },
-    'test_selection_filepath': {"skempi" : "datasets/skempi_v2_cleaned.csv",
+    'test_selection_filepath': {"skempi" : "datasets/skempi_v3_sizes_test.csv",
                                  "wt_pdbs" : "datasets/skempi_pdbs"
                                },
     'max_ba': 1,
     'max_size': 1024*8,
     'min_num_res': 48,
+    'max_chain_size' : 5000,
     'l_types': categ_to_resnames['protein'],
     'r_types': [
         categ_to_resnames['protein'],
@@ -28,7 +29,6 @@ config_data = {
 config_model = {
     "em": {'N0': 30, 'N1': 32},
     "sum": [
-        {'Ns': 32, 'Nh': 2, 'Nk':3, 'nn': 8},
         {'Ns': 32, 'Nh': 2, 'Nk':3, 'nn': 8},
         {'Ns': 32, 'Nh': 2, 'Nk':3, 'nn': 8},
         {'Ns': 32, 'Nh': 2, 'Nk':3, 'nn': 16},
@@ -48,16 +48,16 @@ config_model = {
 tag = datetime.now().strftime("_%Y-%m-%d_%H-%M")
 
 config_runtime = {
-    'run_name': 'a_v0_1'+tag,
+    'run_name': 'mut2ptm_v0_1'+tag,
     'output_dir': 'save',
     'reload': False,
-    'device': 'cpu',
-    'num_epochs': 100,
+    'device': 'cuda',
+    'num_epochs': 10,
     'batch_size': 1,
-    'log_step': 2,
-    'eval_step': 4, #1024*8,
-    'eval_size': 2,
-    'learning_rate': 1e-5,
+    'log_step': 128,
+    'eval_step': 512,
+    'eval_size': 64,
+    'learning_rate': 5e-5,
     'pos_weight_factor': 0.5,
     'comment': "",
 }
