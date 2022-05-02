@@ -212,6 +212,34 @@ class StatePoolLayer(pt.nn.Module):
 
         return qr, pr
 
+class ResiduePoolLayer(pt.nn.Module):
+    def __init__(self, N0, N1):
+        super(ResiduePoolLayer, self).__init__()
+        self.val = pt.nn.Sequential(
+            pt.nn.Linear(N0, N0),
+            pt.nn.ELU(),
+            pt.nn.Linear(N0, N0),
+            pt.nn.ELU(),
+            pt.nn.Linear(N0, N1),
+        )
+        self.att = pt.nn.Sequential(
+            pt.nn.Linear(N0, N0),
+            pt.nn.ELU(),
+            pt.nn.Linear(N0, N0),
+            pt.nn.ELU(),
+            pt.nn.Linear(N0, 1)
+        )
+
+    def forward(self, res, batch_M):
+        res = res.unsqueeze(dim=1)
+        #batch_M = batch_M.unsqueeze(dim=2)
+        #res = res*batch_M
+        vals = self.val(res)
+        atts = self.att(res)
+        atts = pt.nn.functional.softmax(atts, dim = 0)
+        y = vals * atts
+        y = pt.sum(y, dim=0)
+        return y
 
 # >>> LAYERS
 class StateUpdateLayer(pt.nn.Module):
@@ -228,12 +256,12 @@ class StateUpdateLayer(pt.nn.Module):
 
         # update q, p
         ids_nn = ids_topk[:,self.m_nn]
-        # q, p = self.su.forward(q, p, q[ids_nn], p[ids_nn], D_topk[:,self.m_nn], R_topk[:,self.m_nn])
+        q, p = self.su.forward(q, p, q[ids_nn], p[ids_nn], D_topk[:,self.m_nn], R_topk[:,self.m_nn])
 
         # with checkpoint
-        q = q.requires_grad_()
-        p = p.requires_grad_()
-        q, p = checkpoint(self.su.forward, q, p, q[ids_nn], p[ids_nn], D_topk[:,self.m_nn], R_topk[:,self.m_nn])
+        #q = q.requires_grad_()
+        #p = p.requires_grad_()
+        #q, p = checkpoint(self.su.forward, q, p, q[ids_nn], p[ids_nn], D_topk[:,self.m_nn], R_topk[:,self.m_nn])
 
         # sink
         q[0] = q[0] * 0.0

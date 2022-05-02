@@ -173,7 +173,8 @@ class StructuresDataset(pt.utils.data.Dataset):
 
         # label
         deltaG = mut['Affinity_mut_parsed'] - mut['Affinity_wt_parsed']
-        label = (deltaG >= 0).astype(np.float32)
+        propG = deltaG/mut['Affinity_mut_parsed']
+        label = (propG >= 0.15).astype(np.float32)
         label = pt.tensor(label)
         
 

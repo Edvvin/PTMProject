@@ -17,7 +17,7 @@ from model import Model
 def setup_dataloader(config_data, sids_selection_filepath):
 
     # create dataset
-    dataset = StructuresDataset(sids_selection_filepath['wt_pdbs'], sids_selection_filepath['skempi'])
+    dataset = StructuresDataset(sids_selection_filepath['wt_pdbs'], sids_selection_filepath['skempi'], max_chain_size=config_data['max_chain_size'])
     
     val_size = int(0.1764 * len(dataset))
     train_size = len(dataset) - val_size
@@ -59,11 +59,7 @@ def eval_step(model, device, batch_data, criterion, pos_ratios, pos_weight_facto
     y = pt.unsqueeze(y, dim=-1)
     z = pt.cat([z, -z], dim=-1)
     y = pt.cat([y, 1-y], dim=-1)
-    dloss = criterion(z, y)
-
-    # re-weighted losses
-    loss_factors = (pos_ratios / pt.sum(pos_ratios)).reshape(1,-1)
-    losses = (loss_factors * dloss) / dloss.shape[0]
+    losses = criterion(z, y)
 
     return losses, y.detach(), pt.sigmoid(z).detach()
 
@@ -71,18 +67,31 @@ def eval_step(model, device, batch_data, criterion, pos_ratios, pos_weight_facto
 def scoring(eval_results, device=pt.device('cpu')):
     # compute sum losses and scores for each entry
     sum_losses, scores = [], []
+    ys = []
+    ps = []
+    outs = []
+
     for losses, y, p in eval_results:
         sum_losses.append(pt.sum(losses, dim=0))
-        scores.append(bc_scoring(y, p))
+        ys.append(y)
+        ps.append(p)
+        outs.append(pt.sum(p, dim=0))
 
     # average scores
     m_losses = pt.mean(pt.stack(sum_losses, dim=0), dim=0).numpy()
-    m_scores = nanmean(pt.stack(scores, dim=0)).numpy()
+    ys = pt.cat(ys)
+    ps = pt.cat(ps)
+    m_scores = bc_scoring(ys, ps)
+    m_p = pt.mean(pt.stack(outs, dim=0), dim=0).numpy()
+    print(ys)
+    print(ps)
 
     # pack scores
     scores = {'loss': float(np.sum(m_losses))}
+
     for i in range(m_losses.shape[0]):
         scores[f'{i}/loss'] = m_losses[i]
+        scores[f'{i}/outs'] = m_p[i]
         for j in range(m_scores.shape[0]):
             scores[f'{i}/{bc_score_names[j]}'] = m_scores[j,i]
 
@@ -99,7 +108,7 @@ def logging(logger, writer, scores, global_step, pos_ratios, step_type):
     summary_stats['global_step'] = int(global_step)
     summary_stats['pos_ratios'] = list(pos_ratios.cpu().numpy())
     summary_stats['step_type'] = step_type
-    logger.store(**summary_stats)
+    #logger.store(**summary_stats)
 
     # detailed information
     for key in scores:
@@ -139,19 +148,21 @@ def train(config_data, config_model, config_runtime, output_path):
 #        # get last global step
 #        global_step = json.loads([l for l in open(logger.log_lst_filepath, 'r')][-1])['global_step']
 #        # dynamic positive weight
+#       if dyn_pos ratio TODO
 #        pos_ratios = pt.from_numpy(np.array(json.loads([l for l in open(logger.log_lst_filepath, 'r')][-1])['pos_ratios'])).float().to(device)
 #    else:
     # starting global step
     global_step = 0
     
-    # TODO: determine pos_ratio
     # dynamic positive weight
-    pos_ratios = 0.5*pt.ones(2, dtype=pt.float).to(device)
+    if(config_runtime['dyn_pos_ratio']):
+        pos_ratios = 0.5*pt.ones(2, dtype=pt.float).to(device)
+    else:
+        pos_ratios = pt.tensor(config_runtime['pos_ratios']).to(device)
 
     # debug print
     logger.print(">>> Loading data")
 
-    # TODO: set up random split for train/validation
     # setup dataloaders
     dataloader_train, dataloader_val = setup_dataloader(config_data, config_data['train_selection_filepath'])
 
@@ -166,10 +177,24 @@ def train(config_data, config_model, config_runtime, output_path):
     model = model.to(device)
 
     # define losses functions
-    criterion = pt.nn.BCEWithLogitsLoss(reduction="none")
+    if (config_runtime['dyn_pos_ratio']):
+        criterion = pt.nn.BCEWithLogitsLoss(reduction="none")
+    else:
+        criterion = pt.nn.BCEWithLogitsLoss(reduction="none",
+                                            weight=pos_weight_factor * (1.0 - pos_ratios) / (pos_ratios + 1e-6)
+                                           )
 
     # define optimizer
     optimizer = pt.optim.Adam(model.parameters(), lr=config_runtime["learning_rate"])
+    #optimizer = pt.optim.Adam([
+    #    {'params': model.em.parameters(), 'lr': 1e-4},
+    #    {'params': model.sum.parameters(), 'lr': 1e-3},
+    #    {'params': model.dm.parameters(), 'lr': 1e-4},
+    #    {'params': model.mutm.parameters(), 'lr': 1e-4},
+    #    {'params': model.spl.parameters(), 'lr': 1e-4},
+    #    {'params': model.aggr.parameters(), 'lr': 1e-4},
+    #    {'params': model.out.parameters(), 'lr': 1e-4}
+    #])
 
     # restart timer
     logger.restart_timer()
@@ -184,7 +209,7 @@ def train(config_data, config_model, config_runtime, output_path):
     # quick training step on largest data: memory check and pre-allocation
     #batch_data = dataloader_train.dataset.get_largest()
     #optimizer.zero_grad()
-    #losses, _, _ = eval_step(model, device, batch_data, criterion, pos_ratios, config_runtime['pos_weight_factor'], global_step)
+    #losses, _, _ = eval_step(model, device, batch_data, criterion, pos_ratios.to(device), config_runtime['pos_weight_factor'], global_step, dyn_pos_ratio=config_runtime['dyn_pos_ratio'])
     #loss = pt.sum(losses)
     #loss.backward()
     #optimizer.step()
@@ -200,25 +225,41 @@ def train(config_data, config_model, config_runtime, output_path):
             # global step
             global_step += 1
 
-            # set gradient to zero
-            optimizer.zero_grad()
-
             # forward propagation
-            losses, y, p = eval_step(model, device, batch_train_data, criterion, pos_ratios, config_runtime['pos_weight_factor'], global_step)
+            losses, y, p = eval_step(model, device, batch_train_data, criterion, pos_ratios, config_runtime['pos_weight_factor'], global_step, dyn_pos_ratio=config_runtime['dyn_pos_ratio'])
 
             # backward propagation
-            loss = pt.sum(losses)
+            loss = pt.sum(losses)/config_runtime["optimizer_step"]
             loss.backward()
 
-            # optimization step
-            optimizer.step()
+
+            # gradients in sum layers
+            sum_=0
+            for parm in model.sum.parameters():
+                if(parm.requires_grad):
+                    sum_= sum_ + np.abs(parm.grad.data.cpu().numpy()).sum()
+            writer.add_scalar("train/grad_sum", sum_, global_step)
+
+            # gradients in the whole model
+            sum_=0
+            for parm in model.parameters():
+                if(parm.requires_grad):
+                    sum_= sum_ + np.abs(parm.grad.data.cpu().numpy()).sum()
+            writer.add_scalar("train/grad", sum_, global_step)
 
             # store evaluation results
             train_results.append([losses.detach().cpu(), y.cpu(), p.cpu()])
 
+            # optimization step
+            if (global_step+1) % config_runtime["optimizer_step"] == 0:
+                #pt.nn.utils.clip_grad_norm_(model.parameters(), 20, norm_type=1)
+                optimizer.step()
+                optimizer.zero_grad()
+
             # log step
             if (global_step+1) % config_runtime["log_step"] == 0:
                 # process evaluation results
+
                 with pt.no_grad():
                     # scores evaluation results and reset buffer
                     scores = scoring(train_results, device=device)
@@ -241,7 +282,7 @@ def train(config_data, config_model, config_runtime, output_path):
                     test_results = []
                     for step_te, batch_test_data in enumerate(dataloader_val):
                         # forward propagation
-                        losses, y, p = eval_step(model, device, batch_test_data, criterion, pos_ratios, config_runtime['pos_weight_factor'], global_step)
+                        losses, y, p = eval_step(model, device, batch_test_data, criterion, pos_ratios, config_runtime['pos_weight_factor'], global_step, dyn_pos_ratio=config_runtime['dyn_pos_ratio'])
 
                         # store evaluation results
                         test_results.append([losses.detach().cpu(), y.cpu(), p.cpu()])
